@@ -1,0 +1,254 @@
+---
+title: "Untitled"
+author: "Calvin Walters"
+date: "12/27/2020"
+output: html_document
+---
+
+### LIBRARIES
+```{r, warning = FALSE}
+library(tidyverse)
+library(rvest)
+library(dplyr)
+library(purrr)
+library(utils)
+library(maps)
+```
+
+### SCRAPING INFO
+```{r, warning = FALSE}
+url <- "https://247sports.com/Season/2021-Basketball/CompositeRecruitRankings/?InstitutionGroup=HighSchool"
+
+beginning_url <- "https://247sports.com/Season/"
+ending_url <- "-Basketball/CompositeRecruitRankings/?InstitutionGroup=HighSchool"
+classes <- 2003:2021
+final_urls <- paste0(beginning_url, classes, ending_url)
+```
+
+### FUNCTIONS
+```{r}
+scrape <- function(final_urls){
+
+hometowns <- final_urls %>%
+  read_html() %>%
+  html_nodes(".meta") %>%
+  html_text() %>%
+  as.data.frame()
+
+names <- final_urls %>%
+  read_html() %>%
+  html_nodes(".rankings-page__name-link") %>%
+  html_text() %>%
+  as.data.frame()
+
+recruits_final <- cbind(names, hometowns)
+recruits_final <- as.data.frame(recruits_final)
+
+}
+```
+
+### DATA FRAMES
+```{r, warning = FALSE}
+raw_data <- map_df(final_urls, scrape)
+names(raw_data) <- c("Names", "Hometowns")
+raw_data$Hometowns <- as.character(raw_data$Hometowns)
+
+# Clean data in preparation for separating columns
+raw_data[176,2] <- "Hargrave Military Academy (Chatham, VA)" #prev included (HS)
+raw_data[190,2] <- "Hargrave Military Academy (Chatham, VA)" #prev included (HS)
+raw_data[199,2] <- "Stoneridge Preparatory School (Simi Valley, CA)" #prev included (2)
+raw_data[358,2] <- "Stoneridge Preparatory School (Simi Valley, CA)" #prev included (2)
+raw_data[413,2] <- "Hargrave Military Academy (Chatham, VA)" #prev included (HS)
+raw_data[529,2] <- "Hargrave Military Academy (Cleveland, OH)" #prev included (HS)
+raw_data[693,2] <- "Hargrave Military Academy (Marion, SC)" #prev included (HS)
+raw_data[660,2] <- "Athlete Institute Basketball Academy (NA, NA)" #prev hometown was blank
+
+raw_data
+```
+
+```{r}
+# Full 247 Player Database
+
+player_database <- raw_data %>%
+  separate(Hometowns, c("School", "Hometown", "Homestate", NA), sep = "[\\(\\,\\)]")
+player_database$Homestate <- as.character(apply(player_database[c('Homestate')], 2, str_trim))
+
+player_database
+```
+
+```{r}
+# players from USA
+
+states_and_dc <- append(state.abb, "DC")
+
+americans <- player_database %>%
+  filter(Homestate %in% states_and_dc)
+
+americans
+```
+
+```{r}
+# players from foreign countries
+
+foreigners <- player_database %>%
+  filter(!Homestate %in% states_and_dc)
+
+foreigners
+```
+
+```{r, warning = FALSE}
+state_counts <- player_database %>%
+  group_by(Homestate, .drop = FALSE) %>%
+  summarise(count = n(), 
+            .groups = "keep") %>% # to get rid of warning message
+  mutate(area = Homestate, .before = count, .keep = "unused")
+
+for (state in state.abb) {
+  if (!state %in% state_counts$area) {
+    new_row <- c(state, 0)
+    state_counts <- rbind(state_counts, new_row)
+  }
+}
+
+state_counts$count <- as.numeric(state_counts$count)
+state_counts
+```
+
+```{r}
+# US Census Bureua population estimates by year
+# I use average of state populations since 2002 when first class
+# began their senior year of HS
+state_populations <- read_csv("/Users/cal/Desktop/BasketballAnalytics/USpopulationByState.csv")
+
+state_populations <- state_populations %>%
+  separate(`Geographic Area`, c(NA, "area"), sep = "[.]")
+
+state_populations$area <- state.abb[match(state_populations$`area`,state.name)]
+state_populations[1,1] <- "USA"
+state_populations[10,1] <- "DC"
+state_populations[53,1] <- "PUER"
+state_populations <- state_populations[, -c(2:19, 21)]
+names(state_populations) <- c("area", "avg_pop")
+
+state_populations
+```
+
+```{r}
+per_capita <- left_join(state_counts, state_populations, by = "area")
+
+per_capita <- per_capita %>%
+  mutate(percap = count / avg_pop)
+
+per_capita
+```
+
+### VISUALIZATIONS
+```{r}
+# BAR CHART: all states and countries 
+
+player_database %>%
+  ggplot() +
+  geom_bar(mapping = aes(y = Homestate))
+```
+
+```{r}
+# BAR CHART: all states and countries, sorted
+
+player_database %>%
+  ggplot() +
+  geom_bar(mapping = aes(y = reorder(Homestate, Homestate, length),
+                         fill = Homestate),
+           show.legend = FALSE)
+```
+
+```{r}
+# BAR CHART: Top 10 states and countries, sorted
+
+player_database %>%
+  filter(Homestate %in% names(sort(table(Homestate), decreasing = TRUE)[1:10])) %>%
+  ggplot() +
+  geom_bar(mapping = aes(y = reorder(Homestate, Homestate, length), 
+                         fill = Homestate),
+           show.legend = FALSE)
+```
+
+```{r}
+# BAR CHART: all states and countries, filled by School
+
+player_database %>%
+  ggplot() +
+  geom_bar(mapping = aes(y = Homestate, fill = School),
+           show.legend = FALSE)
+```
+
+```{r}
+# BAR CHART: US states per capita, sorted
+
+per_capita %>%
+  filter(!(area %in% c('SW', 'PUER', "ON", 'NA', 'CONG'))) %>%
+  ggplot(aes(x = reorder(area, count / avg_pop), y = (count / avg_pop))) +
+  geom_col() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+  coord_flip()
+```
+
+```{r}
+# TREEMAP: all states and countries
+
+treemap(state_counts, index = 'area', vSize = 'count')
+```
+
+```{r}
+# MAP: US lower 48 states (fill)
+
+state_counts$state <- tolower(state.name[match(state_counts$area, state.abb)])
+
+map <- map_data("state")
+
+ggplot(state_counts, aes(fill = count)) +
+  geom_map(aes(map_id = state), map = map) +
+  expand_limits(x = map$long, y = map$lat) +
+  theme_classic()
+```
+
+```{r}
+# MAP: US lower 48 states (alpha)
+state_counts$state <- tolower(state.name[match(state_counts$area, state.abb)])
+
+map <- map_data("state")
+
+ggplot(state_counts, aes(alpha = count)) +
+  geom_map(aes(map_id = state), map = map) +
+  expand_limits(x = map$long, y = map$lat) +
+  theme_classic()
+```
+
+```{r}
+# MAP: US lower 48 states per capita (fill)
+
+per_capita$state <- tolower(state.name[match(per_capita$area, state.abb)])
+
+map <- map_data("state")
+
+ggplot(per_capita, aes(fill = percap)) +
+  geom_map(aes(map_id = state), map = map) +
+  expand_limits(x = map$long, y = map$lat) +
+  theme_classic()
+```
+
+```{r}
+# MAP: US lower 48 states per capita (alpha)
+
+per_capita$state <- tolower(state.name[match(per_capita$area, state.abb)])
+
+map <- map_data("state")
+
+ggplot(per_capita, aes(alpha = percap)) +
+  geom_map(aes(map_id = state), map = map) +
+  expand_limits(x = map$long, y = map$lat) +
+  theme_classic()
+```
+
+NOTES:
+- DE, HI, ID, MT, ND, WY have 0 players in database
+
