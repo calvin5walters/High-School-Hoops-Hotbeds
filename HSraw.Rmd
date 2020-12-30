@@ -2,7 +2,7 @@
 title: "Untitled"
 author: "Calvin Walters"
 date: "12/27/2020"
-output: html_document
+output: rmarkdown::github_document
 ---
 
 ### LIBRARIES
