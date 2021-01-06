@@ -1,2 +1,2 @@
 # HighSchoolHoopsHotbeds
-An analysis of which regions of the United States produce the best high school basketball players (unfinished...)
+An R Shiny web application that allows for an interactive look into which US states are home to the best high school basketball players.
